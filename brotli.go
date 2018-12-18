@@ -32,8 +32,9 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 
 type writer struct {
 	http.ResponseWriter
-	brParams *enc.BrotliParams
-	brWriter *enc.BrotliWriter
+	brParams      *enc.BrotliParams
+	brWriter      *enc.BrotliWriter
+	mungedHeaders bool
 }
 
 func (w *writer) Close() error {
@@ -44,8 +45,28 @@ func (w *writer) Close() error {
 	return nil
 }
 
-// WriteHeader checks if encoding makes sense and if so changes some headers.
+func (w *writer) Write(b []byte) (int, error) {
+	w.mungeHeaders()
+
+	if w.brWriter != nil {
+		return w.brWriter.Write(b)
+	}
+
+	return w.ResponseWriter.Write(b)
+}
+
 func (w *writer) WriteHeader(code int) {
+	w.mungeHeaders()
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *writer) mungeHeaders() {
+	if w.mungedHeaders {
+		return
+	}
+
+	w.mungedHeaders = true
+
 	headers := w.Header()
 
 	contentType := headers.Get("Content-Type")
@@ -64,16 +85,4 @@ func (w *writer) WriteHeader(code int) {
 			headers.Set("Vary", "Accept-Encoding")
 		}
 	}
-
-	w.ResponseWriter.WriteHeader(code)
-}
-
-// Write encodes on not depending on what WriteHeader decided. This means this
-// middleware only supports encoding with explicit WriteHeader calls.
-func (w *writer) Write(b []byte) (int, error) {
-	if w.brWriter != nil {
-		return w.brWriter.Write(b)
-	}
-
-	return w.ResponseWriter.Write(b)
 }
