@@ -7,9 +7,7 @@ import (
 	"gopkg.in/kothar/brotli-go.v0/enc"
 )
 
-type middleware struct {
-	*enc.BrotliParams
-}
+type middleware struct{ *enc.BrotliParams }
 
 func New(quality int) *middleware {
 	params := enc.NewBrotliParams()
@@ -26,16 +24,24 @@ func (m *middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	brWriter := enc.NewBrotliWriter(m.BrotliParams, w)
-	defer brWriter.Close()
+	wr := &writer{brParams: m.BrotliParams, ResponseWriter: w}
+	defer wr.Close()
 
-	next(&writer{brWriter: brWriter, ResponseWriter: w}, r)
+	next(wr, r)
 }
 
 type writer struct {
 	http.ResponseWriter
+	brParams *enc.BrotliParams
 	brWriter *enc.BrotliWriter
-	compress bool
+}
+
+func (w *writer) Close() error {
+	if w.brWriter != nil {
+		return w.brWriter.Close()
+	}
+
+	return nil
 }
 
 // WriteHeader checks if encoding makes sense and if so changes some headers.
@@ -50,13 +56,13 @@ func (w *writer) WriteHeader(code int) {
 	// Only compress content types that make sense and aren't already encoded.
 	switch contentType {
 	case "application/json", "image/svg+xml", "text/css", "text/html", "text/plain":
-		w.compress = headers.Get("Content-Encoding") == ""
-	}
+		if headers.Get("Content-Encoding") == "" {
+			w.brWriter = enc.NewBrotliWriter(w.brParams, w.ResponseWriter)
 
-	if w.compress {
-		headers.Del("Content-Length")
-		headers.Set("Content-Encoding", "br")
-		headers.Set("Vary", "Accept-Encoding")
+			headers.Del("Content-Length")
+			headers.Set("Content-Encoding", "br")
+			headers.Set("Vary", "Accept-Encoding")
+		}
 	}
 
 	w.ResponseWriter.WriteHeader(code)
@@ -65,7 +71,7 @@ func (w *writer) WriteHeader(code int) {
 // Write encodes on not depending on what WriteHeader decided. This means this
 // middleware only supports encoding with explicit WriteHeader calls.
 func (w *writer) Write(b []byte) (int, error) {
-	if w.compress {
+	if w.brWriter != nil {
 		return w.brWriter.Write(b)
 	}
 
