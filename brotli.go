@@ -45,6 +45,14 @@ func (w *writer) Close() error {
 	return nil
 }
 
+func (w *writer) Flush() {
+	w.ResponseWriter.(http.Flusher).Flush()
+}
+
+func (w *writer) Push(target string, opts *http.PushOptions) error {
+	return w.ResponseWriter.(http.Pusher).Push(target, opts)
+}
+
 func (w *writer) Write(b []byte) (int, error) {
 	w.mungeHeaders()
 
